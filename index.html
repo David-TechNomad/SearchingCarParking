@@ -1,0 +1,1009 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>地下停车场找车</title>
+  <script src="https://unpkg.com/vue@3.4.21/dist/vue.global.prod.js"></script>
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/minified/html5-qrcode.min.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a; --card: #1e293b; --card-hover: #273548;
+      --primary: #3b82f6; --primary-glow: rgba(59,130,246,0.4);
+      --success: #22c55e; --warning: #f59e0b; --danger: #ef4444;
+      --text: #e2e8f0; --text-secondary: #94a3b8; --text-muted: #64748b;
+      --border: #334155; --radius: 16px; --radius-sm: 10px;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+      background: var(--bg); color: var(--text);
+      min-height: 100vh; min-height: 100dvh; overflow-x: hidden;
+      -webkit-tap-highlight-color: transparent; user-select: none;
+    }
+    #app {
+      max-width: 430px; margin: 0 auto; min-height: 100vh;
+      min-height: 100dvh; display: flex; flex-direction: column;
+    }
+    /* 头部 */
+    .header {
+      padding: 12px 16px; display: flex; align-items: center;
+      justify-content: space-between; position: sticky; top: 0; z-index: 10; background: var(--bg);
+    }
+    .header-title { font-size: 20px; font-weight: 700; }
+    .header-badge {
+      font-size: 11px; padding: 4px 10px; border-radius: 20px;
+      background: var(--card); color: var(--text-secondary); border: 1px solid var(--border);
+    }
+    .header-badge.gps { color: #60a5fa; border-color: rgba(59,130,246,0.3); }
+    /* Tab */
+    .tabs {
+      display: flex; margin: 0 16px 10px; background: var(--card);
+      border-radius: var(--radius-sm); padding: 4px; gap: 4px;
+      position: sticky; top: 52px; z-index: 9;
+    }
+    .tab {
+      flex: 1; padding: 10px 0; text-align: center; font-size: 14px;
+      font-weight: 600; border-radius: 8px; cursor: pointer; color: var(--text-muted);
+      transition: all 0.2s; border: none; background: transparent; font-family: inherit;
+    }
+    .tab.active { background: var(--bg); color: var(--text); }
+    .main-content { flex: 1; padding: 0 16px 100px; display: flex; flex-direction: column; gap: 12px; }
+    /* 子Tab */
+    .sub-tabs {
+      display: flex; gap: 4px; background: var(--bg); border-radius: 8px; padding: 3px;
+    }
+    .sub-tab {
+      flex: 1; padding: 7px 0; text-align: center; font-size: 12px; font-weight: 600;
+      border-radius: 6px; cursor: pointer; color: var(--text-muted); border: none;
+      background: transparent; font-family: inherit; transition: all 0.2s;
+    }
+    .sub-tab.active { background: var(--card); color: var(--text); }
+
+    /* 卡片 */
+    .status-card {
+      background: var(--card); border-radius: var(--radius); padding: 20px;
+      border: 1px solid var(--border);
+    }
+    .status-card.parked { border-color: rgba(34,197,94,0.3); }
+    .status-icon-wrap {
+      width: 48px; height: 48px; border-radius: 50%; display: flex;
+      align-items: center; justify-content: center; font-size: 24px; margin-bottom: 12px;
+    }
+    .parked .status-icon-wrap { background: rgba(34,197,94,0.15); }
+    .empty .status-icon-wrap { background: rgba(148,163,184,0.1); }
+    .status-title { font-size: 22px; font-weight: 700; margin-bottom: 2px; }
+    .status-subtitle { color: var(--text-secondary); font-size: 13px; margin-bottom: 6px; }
+    .status-time { font-size: 28px; font-weight: 800; color: var(--success); margin-bottom: 2px; }
+    .status-time-label { font-size: 11px; color: var(--text-muted); }
+    .status-detail { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
+    .detail-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; font-size: 13px; }
+    .detail-label { color: var(--text-muted); min-width: 50px; }
+    .detail-value { color: var(--text); font-weight: 600; }
+    .detail-tag { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; background: rgba(59,130,246,0.15); color: #60a5fa; }
+
+    /* 按钮 */
+    .btn {
+      border: none; cursor: pointer; font-size: 15px; font-weight: 600;
+      border-radius: var(--radius-sm); padding: 12px 20px; display: flex;
+      align-items: center; justify-content: center; gap: 6px;
+      transition: all 0.2s; width: 100%; font-family: inherit;
+    }
+    .btn:disabled { opacity: 0.4; pointer-events: none; }
+    .btn-primary { background: var(--primary); color: #fff; }
+    .btn-primary:active { background: #2563eb; transform: scale(0.97); }
+    .btn-outline { background: transparent; color: var(--text); border: 1.5px solid var(--border); }
+    .btn-outline:active { background: var(--card-hover); }
+    .btn-danger { background: rgba(239,68,68,0.15); color: #f87171; border: 1px solid rgba(239,68,68,0.3); }
+    .btn-amap {
+      background: linear-gradient(135deg, #1b8cf4, #0d6efd); color: #fff;
+      border: none; box-shadow: 0 4px 15px rgba(13,110,253,0.3);
+    }
+    .btn-amap:active { transform: scale(0.97); filter: brightness(1.1); }
+    .btn-sm { font-size: 12px; padding: 8px 14px; width: auto; }
+    .btn-xs { font-size: 10px; padding: 4px 10px; width: auto; }
+    .btn-group { display: flex; gap: 8px; }
+    .btn-icon {
+      width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--border);
+      background: var(--card); color: var(--text); cursor: pointer;
+      display: flex; align-items: center; justify-content: center; font-size: 16px;
+    }
+    .btn-icon:active { background: var(--card-hover); }
+
+    /* 表单 */
+    .form-card { background: var(--card); border-radius: var(--radius); padding: 18px; border: 1px solid var(--border); }
+    .form-title { font-size: 16px; font-weight: 700; margin-bottom: 14px; }
+    .form-group { margin-bottom: 12px; }
+    .form-label { display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 5px; font-weight: 500; }
+    .form-input, .form-select {
+      width: 100%; padding: 11px 12px; border-radius: var(--radius-sm);
+      border: 1.5px solid var(--border); background: var(--bg); color: var(--text);
+      font-size: 14px; font-family: inherit; transition: border-color 0.2s;
+      -webkit-appearance: none; appearance: none;
+    }
+    .form-input:focus, .form-select:focus { outline: none; border-color: var(--primary); }
+    .form-select {
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2394a3b8' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+      background-repeat: no-repeat; background-position: right 12px center; padding-right: 32px;
+    }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+    /* 室外地图 */
+    .outdoor-map-card {
+      background: var(--card); border-radius: var(--radius); border: 1px solid var(--border); overflow: hidden;
+    }
+    .outdoor-map-header {
+      display: flex; align-items: center; justify-content: space-between; padding: 14px 16px 10px;
+    }
+    .outdoor-map-title { font-size: 16px; font-weight: 700; }
+    .outdoor-map-body {
+      position: relative; width: 100%; height: 280px; background: #1a2436;
+    }
+    #outdoorMap { width: 100%; height: 100%; }
+    #amapContainer { width: 100%; height: 100%; position: absolute; top: 0; left: 0; z-index: 1; display: none; }
+    .gps-status {
+      display: flex; align-items: center; gap: 8px; padding: 8px 16px 12px; font-size: 12px;
+    }
+    .gps-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+    .gps-dot.searching { background: var(--warning); animation: pulse 1.5s infinite; }
+    .gps-dot.located { background: var(--success); }
+    .gps-dot.error { background: var(--danger); }
+    .gps-dot.off { background: var(--text-muted); }
+    .gps-info { color: var(--text-secondary); display: flex; gap: 12px; align-items: center; }
+    .gps-coords { font-size: 11px; color: var(--text-muted); }
+    .gps-accuracy { color: var(--success); font-size: 11px; }
+
+    /* 导航摘要条 */
+    .nav-summary {
+      display: flex; align-items: center; gap: 12px; padding: 12px 16px;
+      background: var(--bg); margin: 0 16px; border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+    }
+    .nav-summary-icon { font-size: 28px; flex-shrink: 0; }
+    .nav-summary-info { flex: 1; }
+    .nav-summary-dist { font-size: 20px; font-weight: 700; color: var(--primary); }
+    .nav-summary-label { font-size: 12px; color: var(--text-muted); }
+    .nav-summary-time { font-size: 18px; font-weight: 700; }
+
+    /* 室内地图 */
+    .map-card {
+      background: var(--card); border-radius: var(--radius); padding: 16px; border: 1px solid var(--border);
+    }
+    .map-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+    .map-title { font-size: 16px; font-weight: 700; }
+    .map-toolbar { display: flex; gap: 6px; }
+    .map-legend { display: flex; gap: 14px; font-size: 11px; color: var(--text-muted); margin-top: 8px; }
+    .legend-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
+    .legend-dot.parked { background: #22c55e; }
+    .legend-dot.current { background: #3b82f6; }
+    .legend-dot.path { background: #f59e0b; }
+    .canvas-wrap {
+      position: relative; width: 100%; aspect-ratio: 5/7; border-radius: 8px;
+      overflow: hidden; background: #0a0f1a; touch-action: manipulation;
+    }
+    .canvas-wrap canvas { display: block; width: 100%; height: 100%; }
+
+    /* 导航面板 */
+    .nav-panel {
+      background: var(--card); border-radius: var(--radius); padding: 16px;
+      border: 1px solid rgba(59,130,246,0.3);
+    }
+    .nav-compass {
+      display: flex; align-items: center; gap: 14px; margin-bottom: 12px;
+    }
+    .compass-ring {
+      width: 64px; height: 64px; border-radius: 50%; background: var(--bg);
+      border: 2px solid var(--border); display: flex; align-items: center;
+      justify-content: center; flex-shrink: 0;
+    }
+    .compass-arrow {
+      font-size: 28px; transition: transform 0.5s ease; line-height: 1;
+    }
+    .nav-info { flex: 1; }
+    .nav-distance { font-size: 24px; font-weight: 800; color: var(--primary); }
+    .nav-direction { font-size: 13px; color: var(--text-secondary); }
+    .nav-instruction {
+      padding: 12px; background: var(--bg); border-radius: 8px;
+      font-size: 15px; font-weight: 600; color: var(--text); line-height: 1.6;
+    }
+    .nav-steps-list { margin-top: 8px; }
+    .nav-step-item {
+      display: flex; align-items: flex-start; gap: 8px; padding: 8px 0;
+      font-size: 13px; color: var(--text-secondary); border-bottom: 1px solid var(--border);
+    }
+    .nav-step-item:last-child { border-bottom: none; }
+    .nav-step-num {
+      width: 22px; height: 22px; border-radius: 50%; background: var(--bg);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px; font-weight: 700; flex-shrink: 0; color: var(--text-muted);
+    }
+    .nav-step-num.active { background: var(--primary); color: #fff; }
+
+    /* 图片 */
+    .photo-area {
+      aspect-ratio: 16/10; border-radius: var(--radius-sm);
+      background: var(--bg); border: 2px dashed var(--border);
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 8px; cursor: pointer; overflow: hidden; position: relative;
+    }
+    .photo-area img { width: 100%; height: 100%; object-fit: cover; }
+    .photo-icon { font-size: 28px; color: var(--text-muted); }
+    .photo-text { font-size: 12px; color: var(--text-muted); }
+    .photo-delete {
+      position: absolute; top: 6px; right: 6px; width: 26px; height: 26px;
+      border-radius: 50%; background: rgba(0,0,0,0.6); border: none;
+      color: #fff; cursor: pointer; display: flex; align-items: center;
+      justify-content: center; font-size: 12px;
+    }
+
+    /* 二维码/设置弹窗 */
+    .modal-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 50;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .modal {
+      background: var(--card); border-radius: var(--radius); padding: 20px;
+      width: calc(100% - 32px); max-width: 380px; border: 1px solid var(--border);
+    }
+    .modal-title { font-size: 16px; font-weight: 700; margin-bottom: 12px; }
+    #qrReader { width: 100%; border-radius: 8px; overflow: hidden; }
+
+    /* 历史 */
+    .history-card {
+      background: var(--card); border-radius: var(--radius); padding: 14px;
+      border: 1px solid var(--border); display: flex; align-items: center;
+      gap: 10px; cursor: pointer; transition: all 0.2s;
+    }
+    .history-card:active { background: var(--card-hover); }
+    .history-icon {
+      width: 36px; height: 36px; border-radius: 8px;
+      background: rgba(59,130,246,0.15); display: flex; align-items: center;
+      justify-content: center; font-size: 16px; color: #60a5fa;
+    }
+    .history-info { flex: 1; min-width: 0; }
+    .history-location { font-size: 14px; font-weight: 600; }
+    .history-time { font-size: 11px; color: var(--text-muted); }
+    .history-coords { font-size: 10px; color: var(--text-muted); }
+    .history-delete {
+      width: 28px; height: 28px; border-radius: 50%; border: none;
+      background: transparent; color: var(--text-muted); cursor: pointer;
+      display: flex; align-items: center; justify-content: center; font-size: 12px;
+    }
+
+    /* 快速操作 */
+    .quick-actions {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
+    }
+    .quick-btn {
+      padding: 10px 6px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+      background: var(--card); color: var(--text); cursor: pointer;
+      font-size: 11px; font-weight: 600; text-align: center; font-family: inherit;
+      display: flex; flex-direction: column; align-items: center; gap: 3px;
+    }
+    .quick-btn:active { background: var(--card-hover); }
+    .quick-btn-icon { font-size: 18px; }
+
+    /* Toast */
+    .toast {
+      position: fixed; top: 60px; left: 50%; transform: translateX(-50%);
+      padding: 10px 20px; border-radius: 20px; font-size: 14px; font-weight: 600;
+      z-index: 100; animation: slideUp 0.3s ease-out;
+    }
+    .toast-success { background: var(--success); color: #000; }
+    .toast-error { background: var(--danger); color: #fff; }
+
+    /* Leaflet 暗色覆盖 */
+    .leaflet-container { background: #1a2436 !important; }
+    .leaflet-control-zoom a { background: var(--card) !important; color: var(--text) !important; border-color: var(--border) !important; }
+    .leaflet-control-attribution { display: none !important; }
+
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+    @keyframes slideUp { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:translateY(0)} }
+    .slide-up { animation: slideUp 0.35s ease-out; }
+    #photoInput { display: none; }
+  </style>
+</head>
+<body>
+<div id="app">
+  <!-- 头部 -->
+  <div class="header">
+    <span class="header-title">🅿️ 停车找车</span>
+    <span class="header-badge" :class="{ gps: gpsLocated }" v-if="isParked">
+      {{ gpsLocated ? '📍 GPS已定位' : '已停车 · ' + formattedTimer }}
+    </span>
+    <span class="header-badge" v-else>未停车</span>
+  </div>
+
+  <!-- Tab -->
+  <div class="tabs" v-if="isParked">
+    <button class="tab" :class="{ active: activeTab==='info' }" @click="activeTab='info'">📋 信息</button>
+    <button class="tab" :class="{ active: activeTab==='map' }" @click="activeTab='map'">🗺️ 导航</button>
+  </div>
+
+  <div class="main-content">
+    <!-- ========== 信息 Tab ========== -->
+    <template v-if="!isParked || activeTab==='info'">
+      <template v-if="isParked">
+        <div class="status-card parked slide-up">
+          <div class="status-icon-wrap">📍</div>
+          <div class="status-title">{{ parkingInfo.spotNumber || '已记录' }}</div>
+          <div class="status-subtitle">{{ parkingInfo.floor }} · {{ parkingInfo.zone }}区{{ parkingInfo.landmark ? ' · ' + parkingInfo.landmark : '' }}</div>
+          <div class="status-time">{{ formattedTimer }}</div>
+          <div class="status-time-label">已停车时长</div>
+          <div class="status-detail">
+            <div class="detail-row"><span class="detail-label">楼层</span><span class="detail-tag">{{ parkingInfo.floor }}</span></div>
+            <div class="detail-row"><span class="detail-label">区域</span><span class="detail-value">{{ parkingInfo.zone }}区</span></div>
+            <div class="detail-row" v-if="parkingInfo.spotNumber"><span class="detail-label">车位号</span><span class="detail-value">{{ parkingInfo.spotNumber }}</span></div>
+            <div class="detail-row" v-if="parkingInfo.lat"><span class="detail-label">GPS坐标</span><span class="detail-value">{{ parkingInfo.lat.toFixed(6) }}, {{ parkingInfo.lng.toFixed(6) }}</span></div>
+          </div>
+          <img v-if="parkingInfo.photo" :src="parkingInfo.photo" style="width:100%;border-radius:8px;margin-top:10px;max-height:180px;object-fit:cover;" />
+        </div>
+        <div class="btn-group">
+          <button class="btn btn-outline" @click="shareLocation">📤 分享位置</button>
+          <button class="btn btn-danger" @click="clearParking">🚗 我已离开</button>
+        </div>
+      </template>
+
+      <!-- 未停车 -->
+      <template v-else>
+        <div class="status-card empty slide-up">
+          <div class="status-icon-wrap">🅿️</div>
+          <div class="status-title">标记您的车位</div>
+          <div class="status-subtitle">停好车后记录位置，回来即可导航找到</div>
+        </div>
+        <div class="form-card slide-up">
+          <div class="form-title">📍 车位信息</div>
+          <div class="form-group">
+            <label class="form-label">楼层</label>
+            <select class="form-select" v-model="form.floor"><option value="" disabled>请选择楼层</option><option v-for="f in floors" :key="f" :value="f">B{{ f }}</option></select>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">区域</label>
+              <select class="form-select" v-model="form.zone"><option value="" disabled>选择区域</option><option v-for="z in zones" :key="z" :value="z">{{ z }}区</option></select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">车位号</label>
+              <input class="form-input" v-model="form.spotNumber" placeholder="如 A128" />
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">附近标志物</label>
+            <input class="form-input" v-model="form.landmark" placeholder="如：电梯口、消防栓旁" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">GPS自动定位</label>
+            <div style="display:flex;align-items:center;gap:8px;padding:8px 0;">
+              <span class="gps-dot" :class="!gpsTracking ? 'off' : gpsLocated ? 'located' : 'searching'"></span>
+              <span style="font-size:13px;color:var(--text-secondary);">
+                {{ !gpsTracking ? '点击获取当前位置' : gpsLocated ? '已定位(' + gpsAccuracy + ')' : '定位中...' }}
+              </span>
+              <button class="btn btn-outline btn-xs" @click="toggleGpsTracking" style="margin-left:auto;">
+                {{ gpsTracking ? '停止' : '定位' }}
+              </button>
+            </div>
+            <div class="form-row" v-if="form.lat">
+              <div class="form-group"><input class="form-input" :value="form.lat?.toFixed(6)" readonly placeholder="纬度" style="font-size:12px;color:var(--text-muted);" /></div>
+              <div class="form-group"><input class="form-input" :value="form.lng?.toFixed(6)" readonly placeholder="经度" style="font-size:12px;color:var(--text-muted);" /></div>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">拍照记录（可选）</label>
+            <div class="photo-area" @click="triggerPhoto">
+              <template v-if="form.photo"><img :src="form.photo" /><button class="photo-delete" @click.stop="form.photo=''">✕</button></template>
+              <template v-else><span class="photo-icon">📷</span><span class="photo-text">点击拍照</span></template>
+            </div>
+            <input type="file" id="photoInput" accept="image/*" capture="environment" @change="onPhotoChange" />
+          </div>
+          <div class="form-group"><label class="form-label">备注</label><input class="form-input" v-model="form.note" placeholder="额外记录（选填）" /></div>
+          <button class="btn btn-primary" @click="markParking" :disabled="!canMark">📌 标记停车位置</button>
+        </div>
+      </template>
+    </template>
+
+    <!-- ========== 导航 Tab（合并室外+室内） ========== -->
+    <template v-if="isParked && activeTab==='map'">
+      <!-- 子Tab：室外导航 / 室内导航 -->
+      <div class="sub-tabs slide-up">
+        <button class="sub-tab" :class="{ active: navMode==='outdoor' }" @click="navMode='outdoor'">🌍 室外GPS导航</button>
+        <button class="sub-tab" :class="{ active: navMode==='indoor' }" @click="navMode='indoor'">🏢 室内平面图</button>
+      </div>
+
+      <!-- ===== 室外GPS导航 ===== -->
+      <template v-if="navMode==='outdoor'">
+        <!-- 室外地图 -->
+        <div class="outdoor-map-card slide-up">
+          <div class="outdoor-map-header">
+            <span class="outdoor-map-title">🗺️ 高德地图导航</span>
+            <button class="btn btn-outline btn-xs" @click="refreshGps" :disabled="!gpsTracking">🔄 刷新</button>
+          </div>
+          <div class="outdoor-map-body">
+            <div id="outdoorMap"></div>
+          </div>
+          <div class="gps-status">
+            <span class="gps-dot" :class="!gpsTracking ? 'off' : gpsLocated ? 'located' : 'searching'"></span>
+            <span class="gps-info">
+              <span>{{ !gpsTracking ? 'GPS 未开启' : gpsLocated ? '已定位' : '搜索信号...' }}</span>
+              <span class="gps-accuracy" v-if="gpsAccuracy">{{ gpsAccuracy }}</span>
+            </span>
+            <button class="btn btn-outline btn-xs" style="margin-left:auto;" @click="toggleGpsTracking">
+              {{ gpsTracking ? '关闭' : '开启GPS' }}
+            </button>
+          </div>
+        </div>
+
+        <!-- GPS导航摘要 -->
+        <div class="nav-summary slide-up" v-if="outdoorDistance">
+          <span class="nav-summary-icon">🧭</span>
+          <div class="nav-summary-info">
+            <div class="nav-summary-dist">{{ outdoorDistance }}</div>
+            <div class="nav-summary-label">直线距离</div>
+          </div>
+          <div style="text-align:right;">
+            <div class="nav-summary-time">{{ walkTime }}</div>
+            <div class="nav-summary-label">步行约需</div>
+          </div>
+        </div>
+
+        <!-- 高德地图App导航按钮 -->
+        <div class="slide-up" style="display:flex;flex-direction:column;gap:8px;">
+          <button class="btn btn-amap" @click="openAmapWalk" :disabled="!parkingInfo.lat">
+            📱 打开高德地图 - 步行导航
+          </button>
+          <button class="btn btn-amap" @click="openAmapDrive" :disabled="!parkingInfo.lat">
+            🚗 打开高德地图 - 驾车导航
+          </button>
+          <div style="display:flex;gap:8px;">
+            <button class="btn btn-outline btn-sm" @click="openAmapMap" :disabled="!parkingInfo.lat">🗺️ 高德地图查看</button>
+            <button class="btn btn-outline btn-sm" @click="copyCoords" :disabled="!parkingInfo.lat">📋 复制坐标</button>
+          </div>
+          <div style="font-size:10px;color:var(--text-muted);text-align:center;margin-top:2px;">
+            🚫 停车场内GPS信号弱 → 请切换到「🏢 室内平面图」
+          </div>
+        </div>
+
+        <!-- 没有GPS坐标提示 -->
+        <div class="status-card slide-up" v-if="!parkingInfo.lat" style="text-align:center;">
+          <div style="font-size:36px;margin-bottom:8px;">📡</div>
+          <div style="font-size:15px;font-weight:600;margin-bottom:4px;">无GPS停车位置</div>
+          <div style="font-size:12px;color:var(--text-muted);">
+            标记车位时请在停车场入口处点击「定位」获取GPS坐标<br/>
+            或切换到「🏢 室内平面图」使用室内导航
+          </div>
+        </div>
+      </template>
+
+      <!-- ===== 室内平面图 ===== -->
+      <template v-if="navMode==='indoor'">
+        <div class="quick-actions slide-up">
+          <button class="quick-btn" @click="setMyPosAt('elevator')"><span class="quick-btn-icon">🛗</span>电梯口</button>
+          <button class="quick-btn" @click="setMyPosAt('stairs')"><span class="quick-btn-icon">🚶</span>楼梯口</button>
+          <button class="quick-btn" @click="setMyPosAt('entrance')"><span class="quick-btn-icon">🚪</span>入口处</button>
+          <button class="quick-btn" @click="openQrScanner"><span class="quick-btn-icon">📱</span>扫码定位</button>
+          <button class="quick-btn" @click="clearMyPos"><span class="quick-btn-icon">🔄</span>清除</button>
+          <button class="quick-btn" @click="showAllPath=!showAllPath"><span class="quick-btn-icon">{{ showAllPath?'👁️':'🔍' }}</span>路径</button>
+        </div>
+
+        <div class="map-card slide-up">
+          <div class="map-header">
+            <span class="map-title">🏢 {{ parkingInfo.floor }} 楼层平面图</span>
+            <div class="map-toolbar">
+              <button class="btn-icon" @click="zoomIn">＋</button>
+              <button class="btn-icon" @click="zoomOut">－</button>
+              <button class="btn-icon" @click="resetMapView">⟳</button>
+            </div>
+          </div>
+          <div class="canvas-wrap" ref="canvasWrap" @touchstart="onTouchStart" @touchmove="onTouchMove" @touchend="onTouchEnd" @click="onCanvasClick">
+            <canvas ref="mapCanvas"></canvas>
+          </div>
+          <div class="map-legend">
+            <span><span class="legend-dot parked"></span>您的车位</span>
+            <span v-if="myPos"><span class="legend-dot current"></span>您的位置</span>
+            <span v-if="myPos&&showAllPath"><span class="legend-dot path"></span>导航路径</span>
+            <span style="margin-left:auto;font-size:10px;">💡 点击地图设置位置</span>
+          </div>
+        </div>
+
+        <div class="nav-panel slide-up" v-if="myPos && navInstructions.length > 0">
+          <div class="nav-compass">
+            <div class="compass-ring"><span class="compass-arrow" :style="{transform:'rotate('+compassAngle+'deg)'}">⬆️</span></div>
+            <div class="nav-info"><div class="nav-distance">{{ navDistance }}</div><div class="nav-direction">{{ navDirection }}</div></div>
+            <button class="btn btn-sm btn-outline" @click="clearMyPos">清除</button>
+          </div>
+          <div class="nav-instruction">{{ currentInstruction }}</div>
+          <div class="nav-steps-list">
+            <div class="nav-step-item" v-for="(s,i) in navInstructions" :key="i">
+              <span class="nav-step-num" :class="{active:i===currentStepIndex}">{{ i+1 }}</span>
+              <span :style="{fontWeight:i===currentStepIndex?700:400,color:i===currentStepIndex?'var(--text)':''}">{{ s }}</span>
+            </div>
+          </div>
+        </div>
+        <div class="status-card slide-up" v-else style="text-align:center;">
+          <div style="font-size:36px;margin-bottom:8px;">👆</div>
+          <div style="font-size:15px;font-weight:600;">请设置您的当前位置</div>
+        </div>
+      </template>
+    </template>
+
+    <!-- 历史记录 -->
+    <div v-if="history.length > 0" class="slide-up">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+        <span style="font-size:13px;color:var(--text-muted);font-weight:600;">📋 停车历史 ({{ history.length }})</span>
+        <button class="btn btn-outline btn-xs" @click="clearHistory">清空</button>
+      </div>
+      <div class="history-card" v-for="(h,i) in history" :key="i" @click="restoreFromHistory(h)">
+        <div class="history-icon">{{ h.lat ? '📍' : '🅿️' }}</div>
+        <div class="history-info">
+          <div class="history-location">{{ h.floor }} · {{ h.zone }}区{{ h.spotNumber?' · '+h.spotNumber:'' }}</div>
+          <div class="history-time">{{ formatHistoryTime(h.time) }}</div>
+          <div class="history-coords" v-if="h.lat">{{ h.lat.toFixed(6) }}, {{ h.lng.toFixed(6) }}</div>
+        </div>
+        <button class="history-delete" @click.stop="deleteHistory(i)">✕</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 二维码弹窗 -->
+  <div class="modal-overlay" v-if="showQrModal" @click.self="closeQrScanner">
+    <div class="modal">
+      <div class="modal-title">📱 扫描停车场定位码</div>
+      <div id="qrReader"></div>
+      <button class="btn btn-outline btn-sm" style="margin-top:10px;" @click="closeQrScanner">取消</button>
+    </div>
+  </div>
+
+  <!-- 高德Key设置弹窗 -->
+  <div class="modal-overlay" v-if="showAmapSettings" @click.self="showAmapSettings=false">
+    <div class="modal">
+      <div class="modal-title">⚙️ 高德地图设置</div>
+      <div class="form-group">
+        <label class="form-label">高德 JS API Key</label>
+        <input class="form-input" v-model="amapKey" placeholder="输入高德Key后可启用高德原生地图" />
+      </div>
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px;">
+        可前往 <a href="https://console.amap.com/dev/key/app" target="_blank" style="color:#60a5fa;">高德开放平台</a> 免费申请Key<br/>
+        留空则使用OpenStreetMap（功能正常，仅地图风格不同）
+      </div>
+      <div class="btn-group">
+        <button class="btn btn-outline btn-sm" @click="showAmapSettings=false">取消</button>
+        <button class="btn btn-primary btn-sm" @click="saveAmapKey">保存并加载</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast toast-success" v-if="toast.show&&toast.type==='success'">{{ toast.msg }}</div>
+  <div class="toast toast-error" v-if="toast.show&&toast.type==='error'">{{ toast.msg }}</div>
+</div>
+
+<script>
+const { createApp, ref, computed, onMounted, onUnmounted, nextTick, watch } = Vue;
+
+createApp({
+  setup() {
+    // ========== 基础 ==========
+    const floors = [1,2,3,4,5];
+    const zones = ['A','B','C','D','E','F','G','H'];
+    const activeTab = ref('info');
+    const navMode = ref('outdoor');
+    const form = ref({ floor:'', zone:'', spotNumber:'', landmark:'', note:'', photo:'', lat:null, lng:null });
+    const canMark = computed(() => form.value.floor && form.value.zone);
+
+    // 停车状态
+    const isParked = ref(false);
+    const parkingInfo = ref({ floor:'', zone:'', spotNumber:'', landmark:'', note:'', photo:'', time:null, lat:null, lng:null });
+    const timer = ref(0); let timerInterval = null;
+    const formattedTimer = computed(() => {
+      const t=timer.value; const h=Math.floor(t/3600),m=Math.floor((t%3600)/60),s=t%60;
+      return h>0?`${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`:`${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+    });
+    const startTimer = () => { timerInterval=setInterval(()=>timer.value++,1000); };
+    const stopTimer = () => { if(timerInterval){clearInterval(timerInterval);timerInterval=null;} };
+
+    // Toast
+    const toast = ref({ show:false, msg:'', type:'success' }); let toastTimer=null;
+    const showToast = (msg,type='success')=>{ toast.value={show:true,msg,type}; if(toastTimer)clearTimeout(toastTimer); toastTimer=setTimeout(()=>toast.value.show=false,2000); };
+
+    // 历史
+    const history = ref(JSON.parse(localStorage.getItem('parking_history')||'[]'));
+    const saveHistory = ()=>{ localStorage.setItem('parking_history',JSON.stringify(history.value)); };
+    const addToHistory = (info)=>{ history.value.unshift({...info}); if(history.value.length>20) history.value.pop(); saveHistory(); };
+    const formatHistoryTime = (t)=>{ if(!t)return''; const d=new Date(t); return `${d.getMonth()+1}月${d.getDate()}日 ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; };
+    const restoreFromHistory = (h)=>{
+      parkingInfo.value={...h}; isParked.value=true;
+      timer.value=Math.floor((Date.now()-new Date(h.time).getTime())/1000); startTimer();
+      localStorage.setItem('parking_info',JSON.stringify(parkingInfo.value));
+      localStorage.setItem('parking_time',String(Date.now()));
+      myPos.value=null; showAllPath.value=false;
+      showToast('已恢复停车记录');
+      nextTick(()=>{ drawMap(); drawOutdoorMap(); });
+    };
+    const deleteHistory=(i)=>{ history.value.splice(i,1); saveHistory(); };
+    const clearHistory=()=>{ history.value=[]; saveHistory(); showToast('已清空'); };
+
+    // 停车/清除
+    const markParking = ()=>{
+      if(!canMark.value) return;
+      parkingInfo.value={...form.value, time:new Date().toISOString()};
+      isParked.value=true; timer.value=0; startTimer();
+      localStorage.setItem('parking_info',JSON.stringify(parkingInfo.value));
+      localStorage.setItem('parking_time',String(Date.now()));
+      addToHistory(parkingInfo.value);
+      showToast('✅ 车位已标记'+(parkingInfo.value.lat?' (含GPS坐标)':''));
+      form.value={ floor:'', zone:'', spotNumber:'', landmark:'', note:'', photo:'', lat:null, lng:null };
+      myPos.value=null; showAllPath.value=false; activeTab.value='map';
+      nextTick(()=>{ drawMap(); drawOutdoorMap(); });
+    };
+    const clearParking = ()=>{
+      const dur=formattedTimer.value;
+      isParked.value=false; stopTimer(); timer.value=0;
+      parkingInfo.value={ floor:'', zone:'', spotNumber:'', landmark:'', note:'', photo:'', time:null, lat:null, lng:null };
+      localStorage.removeItem('parking_info'); localStorage.removeItem('parking_time');
+      myPos.value=null; showAllPath.value=false; activeTab.value='info'; navMode.value='outdoor';
+      showToast(`🫡 本次停车时长：${dur}`);
+    };
+
+    // 拍照
+    const triggerPhoto=()=>document.getElementById('photoInput').click();
+    const onPhotoChange=(e)=>{ const f=e.target.files[0]; if(!f)return; const r=new FileReader(); r.onload=ev=>form.value.photo=ev.target.result; r.readAsDataURL(f); e.target.value=''; };
+    const shareLocation=async()=>{
+      const t=`🅿️ 我的停车位置：\n📍 ${parkingInfo.value.floor} ${parkingInfo.value.zone}区${parkingInfo.value.spotNumber?' '+parkingInfo.value.spotNumber:''}${parkingInfo.value.landmark?'\n🏷️ 附近：'+parkingInfo.value.landmark:''}${parkingInfo.value.lat?`\n🌍 GPS: ${parkingInfo.value.lat.toFixed(6)},${parkingInfo.value.lng.toFixed(6)}`:''}`;
+      if(navigator.share){try{await navigator.share({title:'我的停车位置',text:t});}catch{}} else{try{await navigator.clipboard.writeText(t);showToast('已复制');}catch{showToast(t,'error');}}
+    };
+
+    // ========== GPS追踪 ==========
+    const gpsTracking = ref(false);
+    const gpsLocated = ref(false);
+    const gpsAccuracy = ref('');
+    let gpsWatchId = null;
+    let currentGpsPos = ref(null); // { lat, lng }
+
+    const toggleGpsTracking = () => {
+      if (gpsTracking.value) { stopGps(); return; }
+      startGps();
+    };
+    const startGps = () => {
+      if (!navigator.geolocation) { showToast('设备不支持GPS定位','error'); return; }
+      gpsTracking.value = true;
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const { latitude:lat, longitude:lng, accuracy } = pos.coords;
+          currentGpsPos.value = { lat, lng };
+          gpsLocated.value = true;
+          gpsAccuracy.value = `±${Math.round(accuracy)}m`;
+          if (!isParked.value) {
+            form.value.lat = lat; form.value.lng = lng;
+          }
+          if (activeTab.value === 'map' && navMode.value === 'outdoor') drawOutdoorMap();
+        },
+        (err) => { showToast('GPS定位失败: '+err.message, 'error'); gpsTracking.value = false; },
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+      );
+      gpsWatchId = navigator.geolocation.watchPosition(
+        (pos) => {
+          const { latitude:lat, longitude:lng, accuracy } = pos.coords;
+          currentGpsPos.value = { lat, lng };
+          gpsLocated.value = true;
+          gpsAccuracy.value = `±${Math.round(accuracy)}m`;
+          if (!isParked.value) { form.value.lat = lat; form.value.lng = lng; }
+          if (activeTab.value === 'map' && navMode.value === 'outdoor') drawOutdoorMap();
+        },
+        (err) => { console.log('GPS watch error:', err); },
+        { enableHighAccuracy: true, timeout: 30000, maximumAge: 5000 }
+      );
+    };
+    const stopGps = () => {
+      gpsTracking.value = false;
+      if (gpsWatchId !== null) { navigator.geolocation.clearWatch(gpsWatchId); gpsWatchId = null; }
+    };
+    const refreshGps = () => { stopGps(); startGps(); };
+
+    // ========== 室外地图 (Leaflet + 高德App深层链接) ==========
+    let outdoorMap = null;
+    let parkedMarker = null;
+    let userMarker = null;
+    let userCircle = null;
+
+    const initOutdoorMap = () => {
+      const el = document.getElementById('outdoorMap');
+      if (!el || outdoorMap) return;
+      outdoorMap = L.map('outdoorMap', {
+        center: [39.9042, 116.4074],
+        zoom: 15,
+        zoomControl: true,
+        attributionControl: false,
+      });
+      // 使用暗色地图风格
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        maxZoom: 19,
+        subdomains: 'abcd',
+      }).addTo(outdoorMap);
+
+      setTimeout(() => outdoorMap.invalidateSize(), 300);
+      drawOutdoorMap();
+    };
+
+    const drawOutdoorMap = () => {
+      if (!outdoorMap) { initOutdoorMap(); return; }
+      // 清除旧标记
+      if (parkedMarker) { outdoorMap.removeLayer(parkedMarker); parkedMarker = null; }
+      if (userMarker) { outdoorMap.removeLayer(userMarker); userMarker = null; }
+      if (userCircle) { outdoorMap.removeLayer(userCircle); userCircle = null; }
+
+      const bounds = [];
+      // 停车场位置
+      if (parkingInfo.value.lat && parkingInfo.value.lng) {
+        const parkIcon = L.divIcon({
+          html: '<div style="background:#22c55e;width:28px;height:28px;border-radius:50%;border:3px solid #fff;box-shadow:0 0 12px rgba(34,197,94,0.6);display:flex;align-items:center;justify-content:center;font-size:14px;">🅿️</div>',
+          iconSize: [28, 28],
+          iconAnchor: [14, 14],
+        });
+        parkedMarker = L.marker([parkingInfo.value.lat, parkingInfo.value.lng], { icon: parkIcon })
+          .bindPopup(`<b>我的车位</b><br/>${parkingInfo.value.floor} ${parkingInfo.value.zone}区${parkingInfo.value.spotNumber?' '+parkingInfo.value.spotNumber:''}`)
+          .addTo(outdoorMap);
+        bounds.push([parkingInfo.value.lat, parkingInfo.value.lng]);
+      }
+      // 当前位置
+      if (currentGpsPos.value) {
+        userMarker = L.marker([currentGpsPos.value.lat, currentGpsPos.value.lng], {
+          icon: L.divIcon({
+            html: '<div style="background:#3b82f6;width:16px;height:16px;border-radius:50%;border:3px solid #fff;box-shadow:0 0 12px rgba(59,130,246,0.8);"></div>',
+            iconSize: [16, 16],
+            iconAnchor: [8, 8],
+          })
+        }).addTo(outdoorMap);
+        userCircle = L.circle([currentGpsPos.value.lat, currentGpsPos.value.lng], {
+          radius: 15, color: '#3b82f6', fillColor: '#3b82f6', fillOpacity: 0.2, weight: 1,
+        }).addTo(outdoorMap);
+        bounds.push([currentGpsPos.value.lat, currentGpsPos.value.lng]);
+      }
+      if (bounds.length > 0) {
+        outdoorMap.fitBounds(bounds, { padding: [40, 40], maxZoom: 17 });
+      }
+    };
+
+    // GPS距离计算
+    const outdoorDistance = computed(() => {
+      if (!currentGpsPos.value || !parkingInfo.value.lat) return null;
+      const dist = haversineDist(
+        currentGpsPos.value.lat, currentGpsPos.value.lng,
+        parkingInfo.value.lat, parkingInfo.value.lng
+      );
+      return dist < 1000 ? `${Math.round(dist)}m` : `${(dist/1000).toFixed(1)}km`;
+    });
+    const walkTime = computed(() => {
+      if (!outdoorDistance.value) return '--';
+      const m = parseFloat(outdoorDistance.value);
+      const min = Math.round(m / 80); // 步行约80m/min
+      return min < 1 ? '< 1分钟' : `约${min}分钟`;
+    });
+
+    const haversineDist = (lat1, lng1, lat2, lng2) => {
+      const R = 6371000;
+      const dLat = (lat2-lat1)*Math.PI/180;
+      const dLng = (lng2-lng1)*Math.PI/180;
+      const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLng/2)**2;
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    };
+
+    // 高德App深层链接
+    const getAmapUriBase = () => {
+      const ua = navigator.userAgent;
+      if (/iPhone|iPad|iPod/i.test(ua)) return 'iosamap://';
+      return 'amapuri://';
+    };
+    const openAmapWalk = () => {
+      if (!parkingInfo.value.lat) return;
+      const myLat = currentGpsPos.value?.lat || '';
+      const myLng = currentGpsPos.value?.lng || '';
+      const toLat = parkingInfo.value.lat;
+      const toLng = parkingInfo.value.lng;
+      const toName = encodeURIComponent(`${parkingInfo.value.floor} ${parkingInfo.value.zone}区`);
+      // 优先使用高德URI scheme
+      let uri;
+      if (myLat) {
+        uri = `https://uri.amap.com/navigation?from=${myLng},${myLat},我的位置&to=${toLng},${toLat},${toName}&mode=walk&callnative=1`;
+      } else {
+        uri = `https://uri.amap.com/navigation?to=${toLng},${toLat},${toName}&mode=walk&callnative=1`;
+      }
+      window.open(uri, '_blank');
+    };
+    const openAmapDrive = () => {
+      if (!parkingInfo.value.lat) return;
+      const myLat = currentGpsPos.value?.lat || '';
+      const myLng = currentGpsPos.value?.lng || '';
+      const toLat = parkingInfo.value.lat;
+      const toLng = parkingInfo.value.lng;
+      const toName = encodeURIComponent(`${parkingInfo.value.floor} ${parkingInfo.value.zone}区`);
+      let uri;
+      if (myLat) {
+        uri = `https://uri.amap.com/navigation?from=${myLng},${myLat},我的位置&to=${toLng},${toLat},${toName}&mode=car&callnative=1`;
+      } else {
+        uri = `https://uri.amap.com/navigation?to=${toLng},${toLat},${toName}&mode=car&callnative=1`;
+      }
+      window.open(uri, '_blank');
+    };
+    const openAmapMap = () => {
+      if (!parkingInfo.value.lat) return;
+      window.open(`https://uri.amap.com/marker?position=${parkingInfo.value.lng},${parkingInfo.value.lat}&name=${encodeURIComponent('我的车位')}&callnative=1`, '_blank');
+    };
+    const copyCoords = async () => {
+      if (!parkingInfo.value.lat) return;
+      const txt = `${parkingInfo.value.lat.toFixed(6)},${parkingInfo.value.lng.toFixed(6)}`;
+      try { await navigator.clipboard.writeText(txt); showToast('坐标已复制'); }
+      catch { showToast('复制失败','error'); }
+    };
+
+    // ========== 室内地图引擎 ==========
+    const mapCanvas = ref(null);
+    const canvasWrap = ref(null);
+    let ctx = null;
+    const dpr = window.devicePixelRatio || 1;
+    const showAllPath = ref(false);
+    const myPos = ref(null);
+    const mapScale = ref(1);
+    const mapOffset = ref({ x:0, y:0 });
+    let touchStartDist=0, touchStartScale=1;
+    let touchStartOffset={x:0,y:0}, touchStartPos={x:0,y:0};
+
+    const GRID_ROWS=17, GRID_COLS=10;
+    const getCellType=(r,c)=>{
+      if(c===0)return'walkway'; if(c===9)return'pillar';
+      const zr=[1,3,5,7,9,11,13,15]; if(zr.includes(r)&&c>=1&&c<=8)return'spot';
+      return'walkway';
+    };
+    const getSpotZone=(r)=>{ const zm={1:'A',3:'B',5:'C',7:'D',9:'E',11:'F',13:'G',15:'H'}; return zm[r]||''; };
+    const getSpotNumber=(c)=>String(c);
+    const getParkedSpotPos=()=>{
+      if(!parkingInfo.value.zone)return null;
+      const zi=zones.indexOf(parkingInfo.value.zone); if(zi===-1)return null;
+      const row=1+zi*2; let col=4;
+      if(parkingInfo.value.spotNumber){ const n=parseInt(parkingInfo.value.spotNumber.replace(/\D/g,'')); if(!isNaN(n)&&n>=1&&n<=8)col=n; }
+      return{row,col};
+    };
+    const findPath=(from,to)=>{
+      if(!from||!to)return[];
+      const v=new Set(); const q=[[from]]; v.add(`${from.row},${from.col}`);
+      while(q.length){ const p=q.shift(); const{r,c}=p[p.length-1]; if(r===to.row&&c===to.col)return p;
+        for(const[nr,nc]of[[r-1,c],[r+1,c],[r,c-1],[r,c+1]]){ if(nr<0||nr>=GRID_ROWS||nc<0||nc>=GRID_COLS)continue;
+          const k=`${nr},${nc}`; if(v.has(k))continue; if(getCellType(nr,nc)==='pillar')continue; v.add(k); q.push([...p,{row:nr,col:nc}]); } }
+      return[];
+    };
+    const getDirectionName=(a)=>{ a=((a%360)+360)%360;
+      if(a<22.5||a>=337.5)return'向北 ↑'; if(a<67.5)return'向东北 ↗'; if(a<112.5)return'向东 →';
+      if(a<157.5)return'向东南 ↘'; if(a<202.5)return'向南 ↓'; if(a<247.5)return'向西南 ↙';
+      if(a<292.5)return'向西 ←'; return'向西北 ↖';
+    };
+    const navInstructions=ref([]); const currentStepIndex=ref(0);
+    const compassAngle=ref(0); const navDistance=ref(''); const navDirection=ref(''); const currentInstruction=ref('');
+    const updateNavigation=()=>{
+      if(!myPos.value||!parkingInfo.value.zone){navInstructions.value=[];return;}
+      const to=getParkedSpotPos(); if(!to)return;
+      const path=findPath(myPos.value,to); if(!path.length)return;
+      const dist=(path.length-1)*3; navDistance.value=dist<1?'已到达':`${dist}m`;
+      const dx=to.col-myPos.value.col, dy=to.row-myPos.value.row;
+      compassAngle.value=Math.atan2(-dy,dx)*180/Math.PI; navDirection.value=getDirectionName(compassAngle.value);
+      const dirs=[]; for(let i=1;i<path.length;i++){ const dr=path[i].row-path[i-1].row; dirs.push(dr<0?'up':dr>0?'down':path[i].col>path[i-1].col?'right':'left'); }
+      let steps=0,cd=dirs[0]; const ms=[];
+      for(let i=0;i<dirs.length;i++){ if(dirs[i]===cd)steps++; else{ ms.push({dir:cd,steps}); cd=dirs[i]; steps=1; } } ms.push({dir:cd,steps});
+      const dn={up:'向前直行',down:'向后走',left:'向左走',right:'向右走'};
+      const inst=ms.map((s,i)=>{ const m=s.steps*3; let d=''; if(i===0)d='从当前位置'; else if(i===ms.length-1)d='最后'; else d='然后'; return`${d}${dn[s.dir]}约${m}米`; });
+      navInstructions.value=inst; currentStepIndex.value=0; currentInstruction.value=inst[0]||'';
+      drawMap();
+    };
+
+    const drawMap=()=>{
+      if(!mapCanvas.value)return; const canvas=mapCanvas.value, wrap=canvasWrap.value; if(!wrap)return;
+      const ww=wrap.clientWidth, wh=wrap.clientHeight;
+      canvas.width=ww*dpr; canvas.height=wh*dpr; canvas.style.width=ww+'px'; canvas.style.height=wh+'px';
+      ctx=canvas.getContext('2d'); ctx.scale(dpr,dpr);
+      const s=mapScale.value, ox=mapOffset.value.x, oy=mapOffset.value.y;
+      const cw=(ww-40)/GRID_COLS*s, ch=(wh-40)/GRID_ROWS*s;
+      const gw=cw*GRID_COLS, gh=ch*GRID_ROWS;
+      const sx=(ww-gw)/2+ox, sy=(wh-gh)/2+oy;
+      ctx.fillStyle='#0a0f1a'; ctx.fillRect(0,0,ww,wh);
+      const pp=getParkedSpotPos();
+      let np=[]; if(myPos.value&&pp)np=findPath(myPos.value,pp);
+      // 绘制网格
+      for(let r=0;r<GRID_ROWS;r++)for(let c=0;c<GRID_COLS;c++){ const x=sx+c*cw,y=sy+r*ch,t=getCellType(r,c);
+        if(t==='spot'){ ctx.fillStyle='#1a2a1a'; ctx.fillRect(x+2,y+2,cw-4,ch-4); ctx.strokeStyle='#2a3a2a'; ctx.lineWidth=.5; ctx.strokeRect(x+2,y+2,cw-4,ch-4);
+          ctx.fillStyle='#3a5a3a'; ctx.font=`${Math.max(8,cw*.25)}px sans-serif`; ctx.textAlign='center'; ctx.fillText(getSpotZone(r)+getSpotNumber(c),x+cw/2,y+ch/2+4); }
+        else if(t==='walkway'){ ctx.fillStyle='#141e2e'; ctx.fillRect(x+1,y+1,cw-2,ch-2); }
+        else{ ctx.fillStyle='#1a1a2e'; ctx.fillRect(x+4,y+4,cw-8,ch-8); ctx.strokeStyle='#2a2a4e'; ctx.lineWidth=1; ctx.strokeRect(x+4,y+4,cw-8,ch-8); }
+      }
+      // 地标
+      const dm=(p,ic,lb)=>{ const x=sx+p.col*cw+cw/2,y=sy+p.row*ch+ch/2; ctx.font=`${Math.max(12,cw*.35)}px sans-serif`; ctx.textAlign='center'; ctx.fillText(ic,x,y+2);
+        ctx.fillStyle='#94a3b8'; ctx.font=`${Math.max(8,cw*.18)}px sans-serif`; ctx.fillText(lb,x,y+ch*.7); };
+      dm({row:0,col:1},'🛗','电梯'); dm({row:0,col:8},'🚶','楼梯'); dm({row:16,col:5},'🚪','入口');
+      // 路径
+      if(np.length>1&&showAllPath.value){ ctx.strokeStyle='#f59e0b'; ctx.lineWidth=Math.max(2,cw*.15); ctx.lineCap='round'; ctx.setLineDash([6,4]); ctx.beginPath();
+        for(let i=0;i<np.length;i++){ const px=sx+np[i].col*cw+cw/2,py=sy+np[i].row*ch+ch/2; i===0?ctx.moveTo(px,py):ctx.lineTo(px,py); } ctx.stroke(); ctx.setLineDash([]);
+        const t=Date.now()/1e3; for(let i=0;i<np.length;i+=Math.max(1,Math.floor(np.length/8))){ const px=sx+np[i].col*cw+cw/2,py=sy+np[i].row*ch+ch/2;
+          ctx.fillStyle=`rgba(245,158,11,${.4+.3*Math.sin(t*3+i)})`; ctx.beginPath(); ctx.arc(px,py,Math.max(3,cw*.1),0,Math.PI*2); ctx.fill(); } }
+      // 停车位
+      if(pp){ const px=sx+pp.col*cw+cw/2,py=sy+pp.row*ch+ch/2; const pr=Math.max(8,cw*.35)+Math.sin(Date.now()/1e3*4)*3;
+        const g=ctx.createRadialGradient(px,py,pr*.3,px,py,pr+4); g.addColorStop(0,'rgba(34,197,94,.6)'); g.addColorStop(.5,'rgba(34,197,94,.2)'); g.addColorStop(1,'rgba(34,197,94,0)');
+        ctx.fillStyle=g; ctx.beginPath(); ctx.arc(px,py,pr+4,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle='#22c55e'; ctx.beginPath(); ctx.arc(px,py,pr*.4,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle='#fff'; ctx.font=`${Math.max(10,cw*.3)}px sans-serif`; ctx.textAlign='center'; ctx.fillText('🚗',px,py+3); }
+      // 我的位置
+      if(myPos.value){ const mx=sx+myPos.value.col*cw+cw/2,my=sy+myPos.value.row*ch+ch/2;
+        const g2=ctx.createRadialGradient(mx,my,4,mx,my,16); g2.addColorStop(0,'rgba(59,130,246,.7)'); g2.addColorStop(1,'rgba(59,130,246,0)');
+        ctx.fillStyle=g2; ctx.beginPath(); ctx.arc(mx,my,16,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle='#3b82f6'; ctx.beginPath(); ctx.arc(mx,my,6,0,Math.PI*2); ctx.fill(); ctx.strokeStyle='#fff'; ctx.lineWidth=2; ctx.stroke();
+        ctx.fillStyle='#fff'; ctx.font=`${Math.max(10,cw*.3)}px sans-serif`; ctx.textAlign='center'; ctx.fillText('📍',mx,my-12); }
+    };
+    let animFrame;
+    const animateLoop=()=>{
+      if(activeTab.value==='map'&&isParked.value&&navMode.value==='indoor') drawMap();
+      animFrame=requestAnimationFrame(animateLoop);
+    };
+
+    const screenToGrid=(cx,cy)=>{
+      const wrap=canvasWrap.value; if(!wrap)return null;
+      const r=wrap.getBoundingClientRect();
+      const cw=(r.width-40)/GRID_COLS*mapScale.value, ch=(r.height-40)/GRID_ROWS*mapScale.value;
+      const gw=cw*GRID_COLS, gh=ch*GRID_ROWS;
+      const sx=(r.width-gw)/2+mapOffset.value.x, sy=(r.height-gh)/2+mapOffset.value.y;
+      const col=Math.floor((cx-r.left-sx)/cw), row=Math.floor((cy-r.top-sy)/ch);
+      if(col<0||col>=GRID_COLS||row<0||row>=GRID_ROWS)return null;
+      if(getCellType(row,col)==='pillar')return null; return{row,col};
+    };
+    const onCanvasClick=(e)=>{ if(!isParked.value)return; const p=screenToGrid(e.clientX,e.clientY); if(p){myPos.value=p; showAllPath.value=true; showToast('已设置当前位置'); nextTick(updateNavigation); }};
+    const onTouchStart=(e)=>{ if(e.touches.length===2){ touchStartDist=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY); touchStartScale=mapScale.value; } else{ touchStartOffset={x:mapOffset.value.x,y:mapOffset.value.y}; touchStartPos={x:e.touches[0].clientX,y:e.touches[0].clientY}; } };
+    const onTouchMove=(e)=>{ if(e.touches.length===2){ mapScale.value=Math.max(.5,Math.min(3,touchStartScale*Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY)/touchStartDist)); } else{ mapOffset.value={x:touchStartOffset.x+e.touches[0].clientX-touchStartPos.x, y:touchStartOffset.y+e.touches[0].clientY-touchStartPos.y}; } };
+    const onTouchEnd=()=>{};
+    const zoomIn=()=>{ mapScale.value=Math.min(3,mapScale.value+.2); };
+    const zoomOut=()=>{ mapScale.value=Math.max(.5,mapScale.value-.2); };
+    const resetMapView=()=>{ mapScale.value=1; mapOffset.value={x:0,y:0}; };
+    const setMyPosAt=(lm)=>{ const pos={elevator:{row:0,col:1},stairs:{row:0,col:8},entrance:{row:16,col:5}}[lm]; if(pos){myPos.value={...pos};showAllPath.value=true;showToast(`已定位到${lm==='elevator'?'电梯口':lm==='stairs'?'楼梯口':'入口处'}`);nextTick(updateNavigation);} };
+    const clearMyPos=()=>{ myPos.value=null;showAllPath.value=false;navInstructions.value=[];currentInstruction.value=''; drawMap(); };
+
+    // 二维码扫描
+    const showQrModal=ref(false); let qrScanner=null;
+    const openQrScanner=async()=>{ showQrModal.value=true; await nextTick(); try{ qrScanner=new Html5Qrcode('qrReader'); await qrScanner.start({facingMode:'environment'},{fps:10,qrbox:{width:200,height:200}},(t)=>{ try{ const p=t.replace('PARKING:','').split(':'); if(p.length>=4){myPos.value={row:parseInt(p[2]),col:parseInt(p[3])};showAllPath.value=true;showToast('扫码定位成功！');updateNavigation();closeQrScanner();} }catch{showToast('二维码格式不正确','error');} },()=>{}); }catch{showToast('无法打开摄像头','error');showQrModal.value=false;} };
+    const closeQrScanner=()=>{ if(qrScanner){qrScanner.stop().catch(()=>{});qrScanner=null;} showQrModal.value=false; };
+
+    // 高德Key设置
+    const showAmapSettings = ref(false);
+    const amapKey = ref(localStorage.getItem('amap_api_key') || '');
+    const saveAmapKey = () => { localStorage.setItem('amap_api_key', amapKey.value); showAmapSettings.value=false; showToast('Key已保存'); };
+
+    watch(activeTab,(v)=>{ if(v==='map'){ nextTick(()=>{ if(navMode.value==='outdoor'){ initOutdoorMap(); drawOutdoorMap(); } else{ drawMap(); if(myPos.value)updateNavigation(); } }); } });
+    watch(navMode,(v)=>{ nextTick(()=>{ if(v==='outdoor'){ initOutdoorMap(); drawOutdoorMap(); } else{ drawMap(); if(myPos.value)updateNavigation(); } }); });
+    watch([mapScale,mapOffset],()=>{ if(activeTab.value==='map'&&navMode.value==='indoor')drawMap(); },{deep:true});
+
+    // 初始化
+    onMounted(()=>{
+      const s=localStorage.getItem('parking_info'), st=localStorage.getItem('parking_time');
+      if(s&&st){ try{ parkingInfo.value=JSON.parse(s); isParked.value=true; timer.value=Math.floor((Date.now()-parseInt(st))/1000); startTimer(); }catch{ localStorage.removeItem('parking_info'); localStorage.removeItem('parking_time'); } }
+      nextTick(()=>{ if(isParked.value)drawMap(); });
+      animFrame=requestAnimationFrame(animateLoop);
+    });
+    onUnmounted(()=>{ stopTimer(); stopGps(); if(animFrame)cancelAnimationFrame(animFrame); closeQrScanner(); if(outdoorMap){outdoorMap.remove();outdoorMap=null;} });
+
+    return {
+      floors,zones,form,canMark,activeTab,navMode,
+      isParked,parkingInfo,timer,formattedTimer,
+      markParking,clearParking,triggerPhoto,onPhotoChange,shareLocation,
+      toast,history,restoreFromHistory,deleteHistory,clearHistory,formatHistoryTime,
+      // GPS
+      gpsTracking,gpsLocated,gpsAccuracy,currentGpsPos,
+      toggleGpsTracking,startGps,refreshGps,
+      outdoorDistance,walkTime,
+      openAmapWalk,openAmapDrive,openAmapMap,copyCoords,
+      showAmapSettings,amapKey,saveAmapKey,
+      // 室内地图
+      mapCanvas,canvasWrap,showAllPath,myPos,mapScale,mapOffset,
+      onCanvasClick,onTouchStart,onTouchMove,onTouchEnd,zoomIn,zoomOut,resetMapView,
+      setMyPosAt,clearMyPos,
+      showQrModal,openQrScanner,closeQrScanner,
+      navInstructions,currentStepIndex,compassAngle,navDistance,navDirection,currentInstruction,
+    };
+  }
+}).mount('#app');
+</script>
+</body>
+</html>
