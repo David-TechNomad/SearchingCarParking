@@ -5,7 +5,27 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>地下停车场找车</title>
   <script src="https://unpkg.com/vue@3.4.21/dist/vue.global.prod.js"></script>
-  <script src="https://unpkg.com/html5-qrcode@2.3.8/minified/html5-qrcode.min.js"></script>
+  <script>
+    // html5-qrcode 多CDN动态加载：按顺序尝试，某个源失败自动切换下一个，全部失败则标记 failed
+    window.__qrLib = { ready: false, failed: false };
+    (function loadQrLib() {
+      var urls = [
+        'https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js',
+        'https://cdn.staticfile.org/html5-qrcode/2.3.8/html5-qrcode.min.js',
+        'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js'
+      ];
+      var tryLoad = function (i) {
+        if (i >= urls.length) { window.__qrLib.failed = true; return; }
+        var s = document.createElement('script');
+        s.src = urls[i];
+        s.async = true;
+        s.onload = function () { window.__qrLib.ready = true; };
+        s.onerror = function () { s.remove(); tryLoad(i + 1); };
+        document.head.appendChild(s);
+      };
+      tryLoad(0);
+    })();
+  </script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <style>
@@ -294,8 +314,8 @@
     .toast-success { background: var(--success); color: #000; }
     .toast-error { background: var(--danger); color: #fff; }
 
-    /* Leaflet 暗色覆盖 */
-    .leaflet-container { background: #1a2436 !important; }
+    /* Leaflet 暗色覆盖（z-index:0 建立独立层叠上下文，防止地图内部高z-index pane覆盖吸顶tab） */
+    .leaflet-container { position: relative; z-index: 0; background: #1a2436 !important; }
     .leaflet-control-zoom a { background: var(--card) !important; color: var(--text) !important; border-color: var(--border) !important; }
     .leaflet-control-attribution { display: none !important; }
 
@@ -483,7 +503,7 @@
           <button class="quick-btn" @click="setMyPosAt('entrance')"><span class="quick-btn-icon">🚪</span>入口处</button>
           <button class="quick-btn" @click="openQrScanner"><span class="quick-btn-icon">📱</span>扫码定位</button>
           <button class="quick-btn" @click="clearMyPos"><span class="quick-btn-icon">🔄</span>清除</button>
-          <button class="quick-btn" @click="showAllPath=!showAllPath"><span class="quick-btn-icon">{{ showAllPath?'👁️':'🔍' }}</span>路径</button>
+          <button class="quick-btn" @click="togglePath"><span class="quick-btn-icon">{{ showAllPath?'👁️':'🔍' }}</span>路径</button>
         </div>
 
         <div class="map-card slide-up">
@@ -725,8 +745,22 @@ createApp({
       drawOutdoorMap();
     };
 
+    // 确保地图容器已挂载且实例有效：切换Tab时v-if会销毁/重建#outdoorMap，
+    // 旧实例已失效需销毁重建，并重新计算尺寸（invalidateSize）
+    const ensureOutdoorMap = () => {
+      const el = document.getElementById('outdoorMap');
+      if (!el) return;
+      if (outdoorMap && !document.body.contains(outdoorMap.getContainer())) {
+        try { outdoorMap.remove(); } catch(e){}
+        outdoorMap = null; parkedMarker = null; userMarker = null; userCircle = null;
+      }
+      if (!outdoorMap) initOutdoorMap();
+      if (outdoorMap) setTimeout(() => { try { outdoorMap.invalidateSize(); } catch(e){} }, 60);
+    };
+
     const drawOutdoorMap = () => {
-      if (!outdoorMap) { initOutdoorMap(); return; }
+      ensureOutdoorMap();
+      if (!outdoorMap) return;
       // 清除旧标记
       if (parkedMarker) { outdoorMap.removeLayer(parkedMarker); parkedMarker = null; }
       if (userMarker) { outdoorMap.removeLayer(userMarker); userMarker = null; }
@@ -866,7 +900,7 @@ createApp({
     const findPath=(from,to)=>{
       if(!from||!to)return[];
       const v=new Set(); const q=[[{row:from.row,col:from.col}]]; v.add(`${from.row},${from.col}`);
-      while(q.length){ const p=q.shift(); const{r,c}=p[p.length-1]; if(r===to.row&&c===to.col)return p;
+      while(q.length){ const p=q.shift(); const{row:r,col:c}=p[p.length-1]; if(r===to.row&&c===to.col)return p;
         for(const[nr,nc]of[[r-1,c],[r+1,c],[r,c-1],[r,c+1]]){ if(nr<0||nr>=GRID_ROWS||nc<0||nc>=GRID_COLS)continue;
           const k=`${nr},${nc}`; if(v.has(k))continue; const t=getCellType(nr,nc);
           if(t==='pillar')continue; if(t==='spot'&&!(nr===to.row&&nc===to.col))continue;
@@ -889,6 +923,7 @@ createApp({
       const dx=to.col-myPos.value.col, dy=to.row-myPos.value.row;
       compassAngle.value=Math.atan2(-dy,dx)*180/Math.PI; navDirection.value=getDirectionName(compassAngle.value);
       const dirs=[]; for(let i=1;i<path.length;i++){ const dr=path[i].row-path[i-1].row; dirs.push(dr<0?'up':dr>0?'down':path[i].col>path[i-1].col?'right':'left'); }
+      if(!dirs.length){ navDistance.value='已到达'; navDirection.value=''; navInstructions.value=['您已在车位旁']; currentStepIndex.value=0; currentInstruction.value='您已在车位旁'; drawMap(); return; }
       let steps=0,cd=dirs[0]; const ms=[];
       for(let i=0;i<dirs.length;i++){ if(dirs[i]===cd)steps++; else{ ms.push({dir:cd,steps}); cd=dirs[i]; steps=1; } } ms.push({dir:cd,steps});
       const dn={up:'向前直行',down:'向后走',left:'向左走',right:'向右走'};
@@ -940,7 +975,8 @@ createApp({
     };
     let animFrame;
     const animateLoop=()=>{
-      if(activeTab.value==='map'&&isParked.value&&navMode.value==='indoor') drawMap();
+      try{ if(activeTab.value==='map'&&isParked.value&&navMode.value==='indoor') drawMap(); }
+      catch(e){ console.error('drawMap error:',e); }
       animFrame=requestAnimationFrame(animateLoop);
     };
 
@@ -963,14 +999,28 @@ createApp({
     const resetMapView=()=>{ mapScale.value=1; mapOffset.value={x:0,y:0}; };
     const setMyPosAt=(lm)=>{ const pos={elevator:{row:0,col:1},stairs:{row:0,col:8},entrance:{row:16,col:5}}[lm]; if(pos){myPos.value={...pos};showAllPath.value=true;showToast(`已定位到${lm==='elevator'?'电梯口':lm==='stairs'?'楼梯口':'入口处'}`);nextTick(updateNavigation);} };
     const clearMyPos=()=>{ myPos.value=null;showAllPath.value=false;navInstructions.value=[];currentInstruction.value=''; drawMap(); };
+    const togglePath=()=>{ showAllPath.value=!showAllPath.value; drawMap(); if(showAllPath.value&&myPos.value)updateNavigation(); };
 
     // 二维码扫描
     const showQrModal=ref(false); let qrScanner=null;
     const openQrScanner=async()=>{
       showQrModal.value=true;
       await nextTick();
-      // 前置检查：扫码库是否加载成功（CDN不可达时 Html5Qrcode 为 undefined）
-      if(typeof Html5Qrcode==='undefined'){ showToast('扫码组件加载失败，请检查网络后重试','error'); showQrModal.value=false; return; }
+      // 前置检查：扫码库尚未就绪时等待其加载完成（最多等8秒，多CDN降级期间自动等待）
+      if(typeof Html5Qrcode==='undefined'){
+        const waitLib = ()=>new Promise(resolve=>{
+          let waited=0;
+          const iv=setInterval(()=>{
+            waited+=200;
+            if(typeof Html5Qrcode!=='undefined'||(window.__qrLib&&window.__qrLib.failed)||waited>=8000){ clearInterval(iv); resolve(); }
+          },200);
+        });
+        await waitLib();
+        if(typeof Html5Qrcode==='undefined'){
+          showToast(window.__qrLib&&window.__qrLib.failed?'扫码组件加载失败，请检查网络后重试':'扫码组件加载超时，请重试','error');
+          showQrModal.value=false; return;
+        }
+      }
       // 前置检查：当前环境是否支持摄像头（必须为 HTTPS 或 localhost）
       if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){ showToast('当前环境无法访问摄像头，请通过HTTPS或localhost打开页面','error'); showQrModal.value=false; return; }
       let handled=false;
@@ -1014,8 +1064,8 @@ createApp({
     const amapKey = ref(localStorage.getItem('amap_api_key') || '');
     const saveAmapKey = () => { localStorage.setItem('amap_api_key', amapKey.value); showAmapSettings.value=false; showToast('Key已保存'); };
 
-    watch(activeTab,(v)=>{ if(v==='map'){ nextTick(()=>{ if(navMode.value==='outdoor'){ initOutdoorMap(); drawOutdoorMap(); } else{ drawMap(); if(myPos.value)updateNavigation(); } }); } });
-    watch(navMode,(v)=>{ nextTick(()=>{ if(v==='outdoor'){ initOutdoorMap(); drawOutdoorMap(); } else{ drawMap(); if(myPos.value)updateNavigation(); } }); });
+    watch(activeTab,(v)=>{ if(v==='map'){ nextTick(()=>{ if(navMode.value==='outdoor'){ ensureOutdoorMap(); drawOutdoorMap(); } else{ drawMap(); if(myPos.value)updateNavigation(); } }); } });
+    watch(navMode,(v)=>{ nextTick(()=>{ if(v==='outdoor'){ ensureOutdoorMap(); drawOutdoorMap(); } else{ drawMap(); if(myPos.value)updateNavigation(); } }); });
     watch([mapScale,mapOffset],()=>{ if(activeTab.value==='map'&&navMode.value==='indoor')drawMap(); },{deep:true});
 
     // 初始化
@@ -1041,7 +1091,7 @@ createApp({
       // 室内地图
       mapCanvas,canvasWrap,showAllPath,myPos,mapScale,mapOffset,
       onCanvasClick,onTouchStart,onTouchMove,onTouchEnd,zoomIn,zoomOut,resetMapView,
-      setMyPosAt,clearMyPos,
+      setMyPosAt,clearMyPos,togglePath,
       showQrModal,openQrScanner,closeQrScanner,
       navInstructions,currentStepIndex,compassAngle,navDistance,navDirection,currentInstruction,
     };
