@@ -248,7 +248,7 @@
       width: calc(100% - 32px); max-width: 380px; border: 1px solid var(--border);
     }
     .modal-title { font-size: 16px; font-weight: 700; margin-bottom: 12px; }
-    #qrReader { width: 100%; border-radius: 8px; overflow: hidden; }
+    #qrReader { width: 100%; min-height: 260px; border-radius: 8px; overflow: hidden; background: #000; }
 
     /* 历史 */
     .history-card {
@@ -865,10 +865,12 @@ createApp({
     };
     const findPath=(from,to)=>{
       if(!from||!to)return[];
-      const v=new Set(); const q=[[from]]; v.add(`${from.row},${from.col}`);
+      const v=new Set(); const q=[[{row:from.row,col:from.col}]]; v.add(`${from.row},${from.col}`);
       while(q.length){ const p=q.shift(); const{r,c}=p[p.length-1]; if(r===to.row&&c===to.col)return p;
         for(const[nr,nc]of[[r-1,c],[r+1,c],[r,c-1],[r,c+1]]){ if(nr<0||nr>=GRID_ROWS||nc<0||nc>=GRID_COLS)continue;
-          const k=`${nr},${nc}`; if(v.has(k))continue; if(getCellType(nr,nc)==='pillar')continue; v.add(k); q.push([...p,{row:nr,col:nc}]); } }
+          const k=`${nr},${nc}`; if(v.has(k))continue; const t=getCellType(nr,nc);
+          if(t==='pillar')continue; if(t==='spot'&&!(nr===to.row&&nc===to.col))continue;
+          v.add(k); q.push([...p,{row:nr,col:nc}]); } }
       return[];
     };
     const getDirectionName=(a)=>{ a=((a%360)+360)%360;
@@ -879,9 +881,10 @@ createApp({
     const navInstructions=ref([]); const currentStepIndex=ref(0);
     const compassAngle=ref(0); const navDistance=ref(''); const navDirection=ref(''); const currentInstruction=ref('');
     const updateNavigation=()=>{
-      if(!myPos.value||!parkingInfo.value.zone){navInstructions.value=[];return;}
+      if(!myPos.value||!parkingInfo.value.zone){navInstructions.value=[];currentInstruction.value='';navDistance.value='';return;}
       const to=getParkedSpotPos(); if(!to)return;
-      const path=findPath(myPos.value,to); if(!path.length)return;
+      const path=findPath(myPos.value,to);
+      if(!path.length){navInstructions.value=[];currentInstruction.value='';navDistance.value='';return;}
       const dist=(path.length-1)*3; navDistance.value=dist<1?'已到达':`${dist}m`;
       const dx=to.col-myPos.value.col, dy=to.row-myPos.value.row;
       compassAngle.value=Math.atan2(-dy,dx)*180/Math.PI; navDirection.value=getDirectionName(compassAngle.value);
@@ -963,7 +966,47 @@ createApp({
 
     // 二维码扫描
     const showQrModal=ref(false); let qrScanner=null;
-    const openQrScanner=async()=>{ showQrModal.value=true; await nextTick(); try{ qrScanner=new Html5Qrcode('qrReader'); await qrScanner.start({facingMode:'environment'},{fps:10,qrbox:{width:200,height:200}},(t)=>{ try{ const p=t.replace('PARKING:','').split(':'); if(p.length>=4){myPos.value={row:parseInt(p[2]),col:parseInt(p[3])};showAllPath.value=true;showToast('扫码定位成功！');updateNavigation();closeQrScanner();} }catch{showToast('二维码格式不正确','error');} },()=>{}); }catch{showToast('无法打开摄像头','error');showQrModal.value=false;} };
+    const openQrScanner=async()=>{
+      showQrModal.value=true;
+      await nextTick();
+      // 前置检查：扫码库是否加载成功（CDN不可达时 Html5Qrcode 为 undefined）
+      if(typeof Html5Qrcode==='undefined'){ showToast('扫码组件加载失败，请检查网络后重试','error'); showQrModal.value=false; return; }
+      // 前置检查：当前环境是否支持摄像头（必须为 HTTPS 或 localhost）
+      if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){ showToast('当前环境无法访问摄像头，请通过HTTPS或localhost打开页面','error'); showQrModal.value=false; return; }
+      let handled=false;
+      try{
+        qrScanner=new Html5Qrcode('qrReader');
+        await qrScanner.start({facingMode:'environment'},{fps:10,qrbox:{width:240,height:240}},
+          (t)=>{
+            if(handled)return; handled=true;
+            try{
+              // 兼容多种格式：PARKING:楼层:区域:行:列 / PARKING:楼层:行:列 / PARKING:行:列
+              const p=t.replace(/^PARKING:/i,'').split(':').map(s=>s.trim());
+              let row=-1,col=-1;
+              if(p.length>=4){ row=parseInt(p[2]); col=parseInt(p[3]); }
+              else if(p.length===3){ row=parseInt(p[1]); col=parseInt(p[2]); }
+              else if(p.length===2){ row=parseInt(p[0]); col=parseInt(p[1]); }
+              if(isNaN(row)||isNaN(col)||row<0||row>=GRID_ROWS||col<0||col>=GRID_COLS){ showToast('二维码中的坐标无效，请扫描停车场定位码','error'); handled=false; return; }
+              myPos.value={row,col};
+              showAllPath.value=true;
+              showToast('扫码定位成功！');
+              updateNavigation();
+              closeQrScanner();
+            }catch{ showToast('二维码格式不正确','error'); handled=false; }
+          },
+          ()=>{}
+        );
+      }catch(err){
+        console.error('摄像头启动失败:',err);
+        const name=err&&err.name;
+        if(name==='NotAllowedError')showToast('摄像头权限被拒绝，请在浏览器设置中允许访问摄像头','error');
+        else if(name==='NotFoundError'||name==='DevicesNotFoundError')showToast('未检测到摄像头设备','error');
+        else if(name==='NotReadableError'||name==='TrackStartError')showToast('摄像头被其他应用占用，请关闭其他应用后重试','error');
+        else if(name==='OverconstrainedError')showToast('摄像头不支持当前配置，请更换设备重试','error');
+        else showToast('无法打开摄像头：'+(err&&err.message?err.message:'请检查摄像头权限'),'error');
+        showQrModal.value=false;
+      }
+    };
     const closeQrScanner=()=>{ if(qrScanner){qrScanner.stop().catch(()=>{});qrScanner=null;} showQrModal.value=false; };
 
     // 高德Key设置
